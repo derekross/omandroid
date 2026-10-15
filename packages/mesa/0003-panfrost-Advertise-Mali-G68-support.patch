@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Markuss Broks <markuss.broks@gmail.com>
+Date: Mon, 3 Aug 2026 14:47:12 +0300
+Subject: [PATCH] panfrost: Advertise Mali-G68 support
+
+Mali-G68 is a Valhall v9 GPU, similar enough to G57 to work without changes.
+Tested on Exynos8835, which contains Mali-G68 r1p1 with 5 shader cores.
+
+Reviewed-by: Christoph Pillmayer <christoph.pillmayer@arm.com>
+Signed-off-by: Markuss Broks <markuss.broks@gmail.com>
+Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/43414>
+(cherry picked from commit 93d2c51f2277c0a34ecb49ee6cf4d4c9278ad418)
+[Backported to 26.2.4 for Omarchy Mobile: the release-notes hunk is
+ dropped (no docs/relnotes/new_features.txt in the release tarball), and
+ the docs and model-table context differs.]
+---
+ docs/drivers/panfrost.rst      | 2 +-
+ src/panfrost/model/pan_model.c | 2 ++
+ 2 files changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/docs/drivers/panfrost.rst b/docs/drivers/panfrost.rst
+index 840a111..a6fe6db 100644
+--- a/docs/drivers/panfrost.rst
++++ b/docs/drivers/panfrost.rst
+@@ -26,7 +26,7 @@ The following hardware is currently supported:
+ +--------------------+---------------+-----------+--------+--------+
+ | G31, G51, G52, G76 | Bifrost (v7)  | 3.1       | 3.1    | 1.0    |
+ +--------------------+---------------+-----------+--------+--------+
+-| G57                | Valhall (v9)  | 3.1       | 3.1    |        |
++| G57, G68           | Valhall (v9)  | 3.1       | 3.1    |        |
+ +--------------------+---------------+-----------+--------+--------+
+ | G310, G610         | Valhall (v10) | 3.1       | 3.1    | 1.4    |
+ +--------------------+---------------+-----------+--------+--------+
+diff --git a/src/panfrost/model/pan_model.c b/src/panfrost/model/pan_model.c
+index 00a8c7a..f046f1d 100644
+--- a/src/panfrost/model/pan_model.c
++++ b/src/panfrost/model/pan_model.c
+@@ -85,6 +85,8 @@ const struct pan_model pan_model_list[] = {
+                                               MODEL_RATES_X(2, 4, 8,  32,  32, 8)),
+    VALHALL_MODEL(PAN_PROD_ID(9, 0, 3), 0, "G57",    "G77", MODEL_ANISO(ALL),  MODEL_TB_SIZES(16384,  8192),
+                                               MODEL_RATES_X(2, 4, 8,  32,  32, 8)),
++   VALHALL_MODEL(PAN_PROD_ID(9, 2, 4), 0, "G68",    "G78", MODEL_ANISO(ALL),  MODEL_TB_SIZES(16384,  8192),
++                                              MODEL_RATES_X(2, 4, 8,  32,  32, 8)),
+    VALHALL_MODEL(PAN_PROD_ID(10, 8, 2), 0, "G710",   "G710", MODEL_ANISO(ALL),  MODEL_TB_SIZES(32768, 16384),
+                                               MODEL_RATES_X(4, 8, 16,  64,  64, 16)),
+    VALHALL_MODEL(PAN_PROD_ID(10, 8, 7), 0, "G610",   "G710", MODEL_ANISO(ALL),  MODEL_TB_SIZES(32768, 16384),
+-- 
+2.47.3
+
