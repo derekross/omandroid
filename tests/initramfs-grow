@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 # Tests the initramfs's first-boot growth of the root file system
-# (grow_root in device/<codename>/initramfs/init), run with this machine's
+# (grow_root in initramfs/init), run with this machine's
 # e2fsprogs on image files, with blockdev faked to report the "partition"
 # size: an omamobile-root smaller than its partition grows to fill it, once;
 # a root with another label, one already full size, or omamobile.noresize on
@@ -13,7 +13,7 @@ pass() { printf 'ok - %s\n' "$1"; }
 for tool in mkfs.ext4 dumpe2fs resize2fs e2fsck; do command -v $tool >/dev/null || { echo "skip: no $tool"; exit 0; }; done
 t=$(mktemp -d); trap 'rm -rf "$t"' EXIT
 
-init=device/${DEVICE:-cheetah}/initramfs/init
+init=initramfs/init
 grep -q '^  grow_root "\$dev"$' "$init" || fail "boot_arch grows the root before mounting it"
 awk '/^  grow_root "\$dev"$/ {g = NR} /^  mount -t ext4/ {m = NR} END {exit !(g && m && g < m)}' "$init" || fail "grow_root runs before mount"
 grep -q 'e2fsprogs-extra' bin/omamobile || fail "bin/omamobile initramfs includes resize2fs (e2fsprogs-extra)"

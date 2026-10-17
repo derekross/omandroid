@@ -29,7 +29,7 @@ Goal, in order of value:
    under-display fingerprint sensor.
 
 When this plan was written, simpledrm scanned out ABL's framebuffer at `0xfac00000`, and the
-initramfs writes `TRIG_CON = 0x3061` (`device/cheetah/initramfs/init:90`) so
+initramfs writes `TRIG_CON = 0x3061` (`initramfs/init`, from `SIMPLEFB_TRIG_CON`) so
 DECON0 sends a frame on every panel TE pulse (NOTES.md, "Display").
 
 Path abbreviations:

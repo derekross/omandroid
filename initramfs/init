@@ -1,6 +1,12 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
-# Omarchy Mobile M1 "first light" init: bring up USB networking and ssh.
+# Shared first-light init. One script for every device.
+# The only display-register write is the pair in /etc/omamobile-simplefb-trig,
+# which bin/omamobile initramfs installs from SIMPLEFB_TRIG_CON. The init
+# writes it only when the board's first compatible string matches
+# /etc/omamobile-compatible, the descriptor's COMPATIBLE packed beside it.
+# No trigger file, or a different board, means no write. The bring-up probe
+# uses that same check, so a cheetah image does not read every DPP elsewhere.
 # Host side: the phone appears as a USB network adapter; ssh root@172.16.42.1
 
 export PATH=/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -82,17 +88,44 @@ hostname omamobile
 
 say() { echo "omamobile: $*" | tee /dev/kmsg > $SCREEN 2>/dev/null; }
 
-# The panel runs in MIPI DSI command mode: it only takes a new frame when
-# DECON0 sends one on the panel's TE pulse. ABL masks that trigger after
-# drawing the logo, so unmask it (TRIG_CON: clear HW_TRIG_MASK_DECON, set
-# HW_TRIG_EN) and the framebuffer at 0xfac00000 refreshes continuously.
-# Stopgap until we have a real DECON/DSI driver.
-devmem 0x1c240030 0x3061 >/dev/null
+# Return 0 when this image was packed for the board that is running.
+# $1 names the step in the skip line. A missing or different COMPATIBLE
+# skips the step, so a cheetah image cannot touch a Fold.
+board_matches() {
+  local what=$1 want got
+  if [ ! -s /etc/omamobile-compatible ]; then
+    say "$what skipped: image has no board compatible"
+    return 1
+  fi
+  read -r want < /etc/omamobile-compatible
+  got=$(tr '\0' '\n' < /proc/device-tree/compatible | head -n 1)
+  if [ "$got" != "$want" ]; then
+    say "$what skipped: board is ${got:-unknown}, image is $want"
+    return 1
+  fi
+  return 0
+}
+
+# Command-mode panels take a new frame only when their DECON sends one.
+# ABL masks that trigger after the logo. The descriptor's SIMPLEFB_TRIG_CON
+# is the address and value for this phone (TRIG_CON: clear
+# HW_TRIG_MASK_DECON, set HW_TRIG_EN). devmem's second argument is the
+# value, not a width. Stopgap until a real DECON/DSI driver.
+simplefb_trigger() {
+  local trig_addr trig_val
+  [ -s /etc/omamobile-simplefb-trig ] || return 0
+  board_matches "simplefb trigger" || return 0
+  read -r trig_addr trig_val < /etc/omamobile-simplefb-trig
+  devmem "$trig_addr" "$trig_val" >/dev/null || say "simplefb trigger failed"
+}
+simplefb_trigger
 
 clear > $SCREEN 2>/dev/null
 
 # Bring-up probes: watchdog control registers, and the buffer address each
-# display DMA channel (DPP) is scanning out, i.e. where ABL's framebuffer is
+# display DMA channel (DPP) is scanning out, i.e. where ABL's framebuffer is.
+# The packer installs the marker only when the descriptor sets BRINGUP_PROBE=1.
+# The reads cover every DPP, so they also require this image's board.
 probe() {
   {
     for w in 0x10060000 0x10070000; do echo "wtcon $w $(devmem $w)"; done
@@ -103,7 +136,12 @@ probe() {
   } > /run/probe.txt 2>&1
   while read -r line; do echo "omamobile: $line" > /dev/kmsg; done < /run/probe.txt
 }
-probe
+maybe_probe() {
+  [ -f /etc/omamobile-bringup-probe ] || return 0
+  board_matches "bring-up probe" || return 0
+  probe
+}
+maybe_probe
 say "first light on $(cat /proc/sys/kernel/osrelease)"
 
 # USB gadget: CDC NCM network + ACM serial console

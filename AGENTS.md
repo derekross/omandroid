@@ -62,7 +62,7 @@ laptop                                              phone (172.16.42.1, root ove
 ------                                              ----------------------------------
 bin/omamobile kernel   -> Image, dtbs, modules  (docker build env)
 bin/omamobile modules  -> modules-<rel>.tar.zst
-bin/omamobile initramfs-> Alpine + dropbear + device/cheetah/initramfs/init
+bin/omamobile initramfs-> Alpine + dropbear + initramfs/init
                           (storage guard, USB gadget, ssh, switch_root to Arch on userdata)
 ov <overlay...>        -> DTB = default + device/cheetah/overlays/*.dtso (fdtoverlay)
 bin/omamobile images   -> boot/init_boot/vendor_boot/vendor_kernel_boot/dtbo .img
@@ -123,7 +123,7 @@ Each entry gives the gotcha, then the reason or the fix. Details are in the link
 ### Display
 
 - **Google's DPP format codes are named by byte order:** DRM `XRGB8888` is DPP code 4. Code 7 gives a green screen. [DISPLAY-PLAN](device/cheetah/DISPLAY-PLAN.md)
-- **The panel is DSI command mode:** a frame goes out only on a TE-triggered DECON trigger. The initramfs unmasks `TRIG_CON` for simplefb. That write is cheetah-specific: never run it on another device.
+- **The panel is DSI command mode:** a frame goes out only on a TE-triggered DECON trigger. The initramfs unmasks `TRIG_CON` for simplefb from that device's `SIMPLEFB_TRIG_CON`, packed only into its initramfs. The init writes the pair only when the board's first compatible string matches the descriptor's `COMPATIBLE`. Never put another phone's address in a descriptor.
 - **A CRTC check must not demand a primary plane on a CRTC being turned off,** or DPMS off and `remove_fb` fail with -EINVAL.
 - **Hyprland refused DPMS commits while a flip was in flight,** and gave up after one retry. Our `packages/hyprland` patch keeps retrying. [packages/hyprland/README.md](packages/hyprland/README.md)
 - **With the panel really off (gs-decon `screen_off=2`), Omarchy's key handling broke:** `key_press_enables_dpms` lit the screen on the power key's press, so its release turned it off again, and Omarchy's lock waits for a lit screen, so locking after power-off lit the PIN pad. `omamobile-shell` 0.1.20 wakes only through `omamobile-keys` (and touch), and locks behind a zero backlight before powering the panel off.
@@ -192,7 +192,7 @@ Each entry gives the gotcha, then the reason or the fix. Details are in the link
 | `device/cheetah/NOTES.md` | Findings from real hardware, newest first |
 | `device/cheetah/*-PLAN.md`, `*-RESEARCH.md` | One plan per subsystem: facts, design, gated runbook, results |
 | `device/cheetah/overlays/*.dtso` | Bring-up overlays that turn on disabled nodes |
-| `device/cheetah/initramfs/init` | Storage guard, USB gadget, SSH, switch to Arch |
+| `initramfs/init` | Storage guard, USB gadget, SSH, switch to Arch |
 | `kernel/configs/omamobile.config` | Config fragment on top of arm64 `defconfig`, commented by plan |
 | `packages/omamobile-device-cheetah` | Boot-success marker, Wi-Fi and AoC start scripts, udev, modprobe and systemd policy |
 | `packages/omamobile-shell`, `-sensors`, `-gnss`, `-audio`, `-fingerprint`, `-modem` (chroot profile), `libfprint`, `neard`, `mesa`, `hyprland`, `omamobile-keyring` | Userspace packages |

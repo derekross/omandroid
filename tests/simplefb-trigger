@@ -1,0 +1,90 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# The simplefb trigger and the bring-up probe in initramfs/init run only
+# when the image's COMPATIBLE is the board's first compatible string. A
+# cheetah image on a Fold must not write or read those registers.
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
+fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
+pass() { printf 'ok - %s\n' "$1"; }
+init=initramfs/init
+[[ -f $init ]] || fail "no $init"
+grep -q -- '-fno-stack-protector' bin/omamobile || fail "freestanding devmem is linked with -fno-stack-protector"
+grep -q 'packages/omamobile-device-cheetah/src/reboot-to.c' bin/omamobile || fail "reboot-to is built from the package source"
+grep -q 'PATH=/usr/local/bin:$PATH command -v reboot-to' bin/omamobile || fail "push looks for reboot-to on the initramfs PATH"
+grep -q 'same boot id: the reboot did not happen' bin/omamobile || fail "push names an unchanged boot id"
+pass "packer guards the trigger and builds reboot-to for every device"
+
+t=$(mktemp -d); trap 'rm -rf "$t"' EXIT
+{
+  sed -n '/^board_matches() {$/,/^}$/p' "$init"
+  sed -n '/^simplefb_trigger() {$/,/^}$/p' "$init"
+  sed -n '/^maybe_probe() {$/,/^}$/p' "$init"
+} > "$t/fn.sh"
+grep -q '^board_matches() {$' "$t/fn.sh" || fail "board_matches found in $init"
+grep -q '^simplefb_trigger() {$' "$t/fn.sh" || fail "simplefb_trigger found in $init"
+grep -q '^maybe_probe() {$' "$t/fn.sh" || fail "maybe_probe found in $init"
+sed -e "s|/etc/omamobile-|$t/etc/omamobile-|g" \
+    -e "s|/proc/device-tree/compatible|$t/compatible|" \
+    "$t/fn.sh" > "$t/fn-test.sh"
+mkdir -p "$t/etc" "$t/bin"
+printf '#!/bin/sh\necho "$*" >> "%s/devmem.log"\n' "$t" > "$t/bin/devmem"
+chmod +x "$t/bin/devmem"
+# NUL-separated, as the kernel exposes it.
+printf 'google,gs201-felix\0google,gs201\0' > "$t/compatible"
+
+run() {
+  rm -f "$t/devmem.log" "$t/said"
+  PATH="$t/bin:$PATH" sh -c ". '$t/fn-test.sh'; say() { echo \"\$*\" >> '$t/said'; }; simplefb_trigger"
+}
+
+printf '0x1c241030 0x3061\n' > "$t/etc/omamobile-simplefb-trig"
+printf 'google,gs201-felix\n' > "$t/etc/omamobile-compatible"
+run
+[[ "$(cat "$t/devmem.log")" == "0x1c241030 0x3061" ]] || fail "a matching board writes its own pair"
+pass "matching board writes its own trigger"
+
+printf 'google,gs201-cheetah\n' > "$t/etc/omamobile-compatible"
+run
+[[ ! -e $t/devmem.log ]] || fail "a cheetah image on felix wrote a register"
+grep -q 'board is google,gs201-felix, image is google,gs201-cheetah' "$t/said" || fail "mismatch is reported"
+pass "another board's image writes nothing"
+
+rm -f "$t/etc/omamobile-compatible"
+run
+[[ ! -e $t/devmem.log ]] || fail "a trigger without COMPATIBLE wrote a register"
+pass "a trigger file without COMPATIBLE writes nothing"
+
+rm -f "$t/etc/omamobile-simplefb-trig"
+printf 'google,gs201-felix\n' > "$t/etc/omamobile-compatible"
+run
+[[ ! -e $t/devmem.log ]] || fail "no trigger file still wrote a register"
+pass "no trigger file writes nothing"
+
+run_probe() {
+  rm -f "$t/devmem.log" "$t/said"
+  PATH="$t/bin:$PATH" sh -c ". '$t/fn-test.sh'; say() { echo \"\$*\" >> '$t/said'; }; probe() { echo probed >> '$t/devmem.log'; }; maybe_probe"
+}
+
+: > "$t/etc/omamobile-bringup-probe"
+printf 'google,gs201-felix\n' > "$t/etc/omamobile-compatible"
+run_probe
+[[ "$(cat "$t/devmem.log")" == probed ]] || fail "a matching board runs the bring-up probe"
+pass "matching board runs the bring-up probe"
+
+printf 'google,gs201-cheetah\n' > "$t/etc/omamobile-compatible"
+run_probe
+[[ ! -e $t/devmem.log ]] || fail "a cheetah image on felix ran the bring-up probe"
+grep -q 'bring-up probe skipped: board is google,gs201-felix, image is google,gs201-cheetah' "$t/said" || fail "probe mismatch is reported"
+pass "another board's image does not probe"
+
+rm -f "$t/etc/omamobile-compatible"
+run_probe
+[[ ! -e $t/devmem.log ]] || fail "a probe marker without COMPATIBLE ran the probe"
+pass "a probe marker without COMPATIBLE does not probe"
+
+rm -f "$t/etc/omamobile-bringup-probe"
+printf 'google,gs201-felix\n' > "$t/etc/omamobile-compatible"
+run_probe
+[[ ! -e $t/devmem.log ]] || fail "no probe marker still probed"
+pass "no probe marker does not probe"

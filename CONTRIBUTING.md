@@ -63,7 +63,7 @@ Every rule here exists because breaking it either bricks a phone or loses data n
 
 ### 3.2 The read-only storage guard
 
-UFS holds the per-device calibration. The initramfs ([`device/cheetah/initramfs/init`](device/cheetah/initramfs/init)) guards it before anything else runs:
+UFS holds the per-device calibration. The initramfs ([`initramfs/init`](initramfs/init)) guards it before anything else runs:
 
 - It sets every SCSI disk and partition read-only (`blockdev --setro`) as soon as it appears, and keeps a watcher running for the life of PID 1.
 - The only exceptions are an allowlist of GPT partition names: the device's `BOOT_IMAGES` on slot B, and `userdata`.
@@ -121,7 +121,7 @@ Bring-up steps hang phones. Plan for it before you start:
 # Kernel: defconfig + kernel/configs/omamobile.config, built in the container
 bin/omamobile kernel           # Image, DTBs, modules into $KERNEL_OUT
 bin/omamobile modules          # stripped modules tarball for the Arch root
-bin/omamobile initramfs        # Alpine + dropbear + device/<codename>/initramfs/init
+bin/omamobile initramfs        # Alpine + dropbear + the shared initramfs/init
 bin/omamobile images           # boot, init_boot, vendor_boot, vendor_kernel_boot, dtbo
 
 # A first install: packages, root image, then the installer (phone in fastboot)
@@ -206,7 +206,7 @@ The same SoC does **not** mean the same board. The panel, touch controller, PMIC
   - It leaves the cluster watchdogs running, which resets the phone after about 60 s unless a watchdog driver takes them over.
 - **Check every stock `reserved-memory` node against `/proc/iomem`.** Firmware that writes into RAM the kernel thinks is free corrupts data silently. Mind the cell sizes: on gs201 each `reg` entry is 12 bytes, and a wrong length makes the kernel ignore the property without a word.
 - **Write the device descriptor**, `device/<codename>/device.conf`, starting from [cheetah's](device/cheetah/device.conf): the DTB name, the `soc_id` values (from the live DT and `fastboot getvar all`), the board dtbo source and its `board_id`/`board_rev`, the boot images the phone has (`fastboot getvar all` lists the partitions; older Pixels lack `init_boot` and `vendor_kernel_boot`), the storage-guard allowlist and the panel size. Then every `bin/omamobile` command takes the device from the environment: `DEVICE=<codename> bin/omamobile images`. [docs/RELEASES.md](docs/RELEASES.md) §3 describes each key and what `bin/omamobile` checks. The allowlist may only name `*_b` partitions and `userdata`.
-- The initramfs `init` is still cheetah's ([`device/cheetah/initramfs/init`](device/cheetah/initramfs/init)): copy it to `device/<codename>/initramfs/init`, keep its `UFS_RW` identical to the descriptor's (the build checks), and **remove cheetah's display trigger `devmem` write and its `probe()` register reads**: they are gs201 DECON and watchdog addresses. **Never run cheetah's `devmem` writes on another phone.** A shared init with these quirks generated from the descriptor is step 2 of the release track ([ROADMAP](docs/ROADMAP.md) §3.8).
+- The initramfs `init` is shared ([`initramfs/init`](initramfs/init)). Do not copy it. Set `INITRAMFS_INIT=/initramfs/init`. The display trigger is `SIMPLEFB_TRIG_CON="0xADDR 0xVALUE"` in the descriptor. `bin/omamobile initramfs` writes that pair into the image, and the init runs it only when the board's first compatible string matches the descriptor's `COMPATIBLE`. Leave the key unset and the init writes no display register. **Never put another phone's address in the descriptor.** `probe()` runs only when `BRINGUP_PROBE=1` and the board's first compatible string matches `COMPATIBLE`. Those reads cover every display DMA channel, so leave the key unset until this phone's panels are driven. `UFS_RW` in the shared init must match the descriptor. The build checks. The rest of the per-device init (the USB product string, the main LUN) is still step 2 of the release track ([ROADMAP](docs/ROADMAP.md) §3.8).
 
 ### 5.4 Bring-up order that worked
 

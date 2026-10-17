@@ -30,10 +30,10 @@ The audit behind this design (2026-10-13). "Step" names the roadmap step that re
 | Where | What is hard-coded | Step |
 | --- | --- | --- |
 | `bin/omamobile images` | DTB path `gs201-cheetah.dtb`; `soc_id` 0x9855001 and the 0x9855000 rewrite; the `cheetah-m1-overlay.dts` dtbo and `--id=0x30306 --rev=0x10000`; the vendor cmdline (`earlycon` at gs201's UART); `--os_version`/`--os_patch_level`; the vendor page size | 1 (done) |
-| `bin/omamobile initramfs` | the init path `device/cheetah/initramfs/init`; the splash size 1440x3120; C sources from `packages/omamobile-device-cheetah/src` | 1 (done) |
+| `bin/omamobile initramfs` | the splash size comes from `PANEL_SIZE`; C sources from the device package when it has them. The init path and the trigger write come from the descriptor | 1 (done) |
 | `bin/omamobile capture` | the default capture name `cheetah-<date>` | 1 (done) |
 | `bin/omamobile push`, `flash` | the partition lookup assumes the main LUN is `sda` | 1 (allowlist check and `BOOT_IMAGES` layouts done; the Pixel 6 has no `init_boot` or `vendor_kernel_boot`, [oriole NOTES](../device/oriole/NOTES.md)), 3 |
-| `device/cheetah/initramfs/init` | `UFS_RW` (now checked against the descriptor at build time); the DECON `TRIG_CON` write `devmem 0x1c240030 0x3061` (gs201/cheetah only: **never on another phone**); the bring-up `probe()` register reads (watchdog, DPP); the USB product string "Pixel 7 Pro (M1)"; the main LUN `sda` | 2 |
+| `initramfs/init` | `UFS_RW` (checked against the descriptor at build time); `probe()` when `BRINGUP_PROBE=1` and the board matches `COMPATIBLE` (watchdog and DPP reads); the USB product string "Pixel 7 Pro (M1)"; the main LUN `sda`. The TRIG_CON write is `SIMPLEFB_TRIG_CON` in the descriptor, packed into that device's initramfs only | 2 (trigger done; the rest still step 2) |
 | `bin/omamobile initramfs` | the developer's `~/.ssh/*.pub` baked in as `authorized_keys` (fine for development, never for a release) | 2 |
 | `tools/extract-vendor-firmware` | `BOARD="google,gs201-cheetah"`, `DEVICE="cheetah"`, the firmware `MAP` | 4 |
 | `tools/extract-vendor-chroot`, `extract-fingerprint-vendor` | `DEVICE="cheetah"`, cheetah's file lists | 4 |
@@ -72,15 +72,16 @@ Bring-up tools (`*-stage`, `display-hz`, `usbc-deadman`) stay per plan: they pok
 | `OS_VERSION`, `OS_PATCH_LEVEL` | `17.0.0`, `2026-07` | The `init_boot` header values (the `boot` header's, on a device without `init_boot`) |
 | `BOOT_IMAGES` | `boot init_boot vendor_boot vendor_kernel_boot dtbo` | The images written to slot B (the `_b` suffix is added by the tools and is not configurable). `boot`, `vendor_boot` and `dtbo` are always there. Without `init_boot`, `boot` carries the empty generic ramdisk and the OS version; without `vendor_kernel_boot`, `vendor_boot` carries the DTB and the initramfs (the Pixel 6: `boot vendor_boot dtbo`) |
 | `UFS_RW` | `boot_b … dtbo_b userdata` | The storage guard's allowlist. Only `*_b` names and `userdata` are accepted, and every `BOOT_IMAGES` entry must be on it |
-| `INITRAMFS_INIT` | `initramfs/init` | The init script, relative to the descriptor |
+| `INITRAMFS_INIT` | `/initramfs/init` | The init script. A leading `/` is relative to the repo root, so devices share one script. Any other value is relative to the descriptor |
+| `SIMPLEFB_TRIG_CON` | `0x1c240030 0x3061` | This device's simplefb trigger write, `addr value`, packed into its initramfs next to `COMPATIBLE`. The init writes it only when that string is the board's first compatible. Absent or empty: no display write. Felix: `0x1c241030 0x3061` (cover, DECON1) |
+| `BRINGUP_PROBE` | `1` | Install the boot probe that reads watchdog and DPP registers. The init runs it only when the board matches `COMPATIBLE`. Absent on a phone whose panels are not driven yet |
 | `PANEL_SIZE` | `1440x3120` | Portrait panel size for the early splash |
 
 ### 3.2 Keys to add later
 
 | Key | Step | Meaning |
 | --- | --- | --- |
-| `DISPLAY_KICK` | 2 | The display trigger write for simplefb, as `addr:value`, or empty. Cheetah: `0x1c240030:0x3061`. Generated into the initramfs only for the device it belongs to |
-| `USB_PRODUCT` | 2 | The USB gadget product string |
+| `USB_PRODUCT` | 2 | The USB gadget product string. The shared init still says "Pixel 7 Pro (M1)" |
 | `MAIN_LUN` | 2 | The UFS LUN holding the partition table with slot B and `userdata` (`sda`) |
 | `FIRMWARE_MAP` | 4 | A file beside the descriptor (`firmware.map`: `source-in-vendor|destination` lines), replacing the arrays in `tools/extract-vendor-firmware` |
 | `FACTORY_PRODUCT` | 4 | The `board=` value in the factory image's `android-info.txt`, and `fastboot getvar product`, checked before extraction and before flashing |
@@ -147,7 +148,7 @@ The same Alpine-based initramfs, with release differences:
 
 - **No developer keys.** It ships without `authorized_keys`. The hook appends a second, tiny cpio to the ramdisk that holds the phone's own `/root/.ssh/authorized_keys` (the kernel unpacks concatenated cpio archives in order), so SSH into the initramfs keeps working for the phone's owner and nobody else.
 - **No bring-up probes.** `probe()` and `omamobile.debug` stay in development builds only.
-- **Quirks from the descriptor.** Step 2 turns `device/cheetah/initramfs/init` into a shared `initramfs/init` that reads a generated `/etc/omamobile/device.conf` (`UFS_RW`, `MAIN_LUN`, `DISPLAY_KICK`, `USB_PRODUCT`). A device without a `DISPLAY_KICK` gets no register write at all. Step 2 changes what boots, so it gets its own runbook and a test boot from `bin/omamobile push`; it is not a refactor.
+- **Quirks from the descriptor.** The trigger write is already per device: `bin/omamobile initramfs` packs `SIMPLEFB_TRIG_CON` into `/etc/omamobile-simplefb-trig` and `COMPATIBLE` beside it. The init writes the pair only when the board's first compatible string matches. A device without the trigger key gets no register write. Step 2 still turns the remaining quirks (`UFS_RW`, `MAIN_LUN`, `USB_PRODUCT`) into a generated `/etc/omamobile/device.conf` the shared init reads at boot. That remaining step changes what boots, so it gets its own runbook and a test boot from `bin/omamobile push`; it is not a refactor.
 - **Reproducible:** fixed mtimes (`SOURCE_DATE_EPOCH`), sorted file list, `cpio --reproducible`.
 
 ### 5.3 What `omamobile-boot-update` does
@@ -205,7 +206,7 @@ For a first install, or to recover a phone that won't boot. One bundle per devic
 | aarch64 packages without a phone | `tools/build-packages` | makepkg in an Arch Linux ARM container (the official tarball, MD5 and signature checked against the pinned build key, `tools/lib/alarm.sh`) under the laptop's qemu-user; signs with `keys/` into `out/repo/aarch64`. Mesa, Hyprland and libcamera take hours this way, so they're built only when named, once per version |
 | The shared root image | `tools/build-rootfs`, `rootfs/` | pacstrap in that container: `rootfs/packages.base`, then Omarchy's own `install/omarchy-base.packages` (minus `rootfs/packages.omarchy-skip` and what isn't built for aarch64), then `rootfs/packages.omamobile` and the device package, the `[omamobile]` repository itself, the kernel modules of the current build, and `patches/omarchy`. Output `out/omamobile-rootfs-<date>-aarch64.img.zst`, `.sha256` and a `MANIFEST` with every package version (also inside, `/usr/share/omamobile/rootfs/MANIFEST`) |
 | First boot | `packages/omamobile-firstboot` | reads `/etc/omamobile/firstboot.conf` (data, never sourced), creates the user, SSH keys, ufw with SSH on `usb0`, runs Omarchy's own setup leaves (skipping four that don't fit a phone), SDDM autologin and the lock, Omarchy's and our user setup, then deletes the file |
-| Growing the root | `device/cheetah/initramfs/init` (`grow_root`) | `resize2fs` before mounting, only for a file system labelled `omamobile-root` smaller than its partition; `omamobile.noresize` skips it |
+| Growing the root | `initramfs/init` (`grow_root`) | `resize2fs` before mounting, only for a file system labelled `omamobile-root` smaller than its partition; `omamobile.noresize` skips it |
 | The installer | `tools/install-phone` (the bundle's `install`) | as described below, steps 1, 3-5; the factory-image step (2) is `tools/phone-provision` after the first boot instead |
 | The bundle | `tools/make-bundle` | `out/bundle/omamobile-<codename>-<date>/` as below, `SHA256SUMS.sig` from `keys/` |
 | Per-phone data | `tools/phone-provision` | the extract tools on the user's factory image, pushed over USB SSH, plus the phone's own backup (modem board id and NV checksums, camera data, settings, home screens, fingerprint state only with `--fingerprint`) |

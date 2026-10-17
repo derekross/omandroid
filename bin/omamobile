@@ -208,7 +208,15 @@ cmd_modules_push() {
 cmd_initramfs() {
   local dl="$WORK/downloads/alpine" stage="$KERNEL_OUT/initramfs" ver=3.24.2
   load_device
-  local init="$ROOT/device/$DEVICE/$DEV_INITRAMFS_INIT"
+  # A leading slash is repo-root relative, so devices share initramfs/init.
+  # Anything else is relative to device/<codename>/.
+  local init
+  if [[ $DEV_INITRAMFS_INIT == /* ]]; then
+    init="$ROOT$DEV_INITRAMFS_INIT"
+  else
+    init="$ROOT/device/$DEVICE/$DEV_INITRAMFS_INIT"
+  fi
+  [[ -f $init ]] || die "no init script $init"
   # The init's own storage-guard allowlist must be the descriptor's
   [[ "$(sed -n 's/^UFS_RW="\(.*\)"$/\1/p' "$init")" == "$DEV_UFS_RW" ]] \
     || die "UFS_RW in $init differs from device/$DEVICE/device.conf"
@@ -235,6 +243,27 @@ cmd_initramfs() {
   done
   install -m 755 "$init" "$stage/init"
 
+  # This device's simplefb trigger, and nothing else's. The init writes
+  # exactly this pair, and only when the board matches COMPATIBLE.
+  # Absent or empty: it writes no display register. The bring-up probe
+  # uses the same COMPATIBLE file, so it is packed for either step.
+  mkdir -p "$stage/etc"
+  if [[ -n ${DEV_SIMPLEFB_TRIG_CON:-} || -n ${DEV_BRINGUP_PROBE:-} ]]; then
+    [[ -n ${DEV_COMPATIBLE:-} ]] || die "COMPATIBLE is missing"
+    printf '%s\n' "$DEV_COMPATIBLE" > "$stage/etc/omamobile-compatible"
+  fi
+  if [[ -n ${DEV_SIMPLEFB_TRIG_CON:-} ]]; then
+    [[ $DEV_SIMPLEFB_TRIG_CON =~ ^0x[0-9a-fA-F]+[[:space:]]+0x[0-9a-fA-F]+$ ]] \
+      || die "SIMPLEFB_TRIG_CON must be \"0xADDR 0xVALUE\" (hex)"
+    printf '%s\n' "$DEV_SIMPLEFB_TRIG_CON" > "$stage/etc/omamobile-simplefb-trig"
+  fi
+  # DPP and watchdog reads. Off unless the descriptor asks, and the init
+  # still refuses them when the board does not match COMPATIBLE.
+  if [[ -n ${DEV_BRINGUP_PROBE:-} ]]; then
+    [[ $DEV_BRINGUP_PROBE == 1 ]] || die "BRINGUP_PROBE must be 1 or absent"
+    : > "$stage/etc/omamobile-bringup-probe"
+  fi
+
   # Boot logo, drawn by init straight onto the framebuffer until Plymouth
   # takes over: Omarchy's Plymouth screen (logo centred on #1a1b26, at scale
   # 1), rendered from the theme installed on this Omarchy machine.
@@ -246,26 +275,60 @@ cmd_initramfs() {
     say "No Omarchy Plymouth logo or ImageMagick here: building without the early splash"
   fi
 
-  # devmem: 32-bit register access for bring-up, built against Alpine's musl
-  local sysroot="$WORK/downloads/alpine/sysroot" builtins
-  if [[ ! -f "$sysroot/usr/lib/crt1.o" ]]; then
-    mkdir -p "$sysroot"
-    tar -xzf "$dl/$tarball" -C "$sysroot"
-    for apk in $(python3 -I "$ROOT/tools/alpine-fetch.py" "$ver" "$dl/apks" musl-dev); do
-      tar -xzf "$apk" -C "$sysroot" 2>/dev/null || true
-    done
+  # devmem and bootctl are built against Alpine's musl with the Android
+  # clang when the device package ships bootctl. reboot-to has one source,
+  # inside the cheetah package, so a copied package builds and every
+  # initramfs links that same file. The Android clang is used when that
+  # sysroot is already in use, otherwise the host clang against the same
+  # musl sysroot. A first-light device has no bootctl.
+  alpine_sysroot() {
+    local sysroot="$WORK/downloads/alpine/sysroot" apk
+    if [[ ! -f $sysroot/usr/lib/crt1.o ]]; then
+      mkdir -p "$sysroot"
+      tar -xzf "$dl/$tarball" -C "$sysroot"
+      for apk in $(python3 -I "$ROOT/tools/alpine-fetch.py" "$ver" "$dl/apks" musl-dev); do
+        tar -xzf "$apk" -C "$sysroot" 2>/dev/null || true
+      done
+    fi
+    [[ -f $sysroot/usr/lib/libc.a ]] || die "alpine musl sysroot has no libc.a"
+    printf '%s\n' "$sysroot"
+  }
+  local sysroot builtins reboot_src="$ROOT/packages/omamobile-device-cheetah/src/reboot-to.c"
+  [[ -f $reboot_src ]] || die "missing $reboot_src"
+  mkdir -p "$stage/usr/local/bin"
+  if [[ -f $ROOT/packages/$DEV_PACKAGE/src/omamobile-bootctl.c ]]; then
+    [[ -n ${CLANG_DIR:-} && -d $CLANG_DIR ]] || die "no clang found; run 'lineage-ref sync' first or set CLANG_DIR"
+    sysroot=$(alpine_sysroot)
+    builtins=$(find "$CLANG_DIR/lib/clang" -name 'libclang_rt.builtins-aarch64-android.a' | head -1)
+    "$CLANG_DIR/bin/clang" --target=aarch64-linux-musl --sysroot="$sysroot" -fuse-ld=lld -static -nostdlib -O2 \
+      -o "$stage/usr/local/bin/devmem" "$sysroot/usr/lib/crt1.o" "$sysroot/usr/lib/crti.o" \
+      "$ROOT/tools/devmem.c" -L"$sysroot/usr/lib" -lc "$builtins" "$sysroot/usr/lib/crtn.o"
+    "$CLANG_DIR/bin/clang" --target=aarch64-linux-musl --sysroot="$sysroot" -fuse-ld=lld -static -nostdlib -O2 \
+      -o "$stage/usr/local/bin/reboot-to" "$sysroot/usr/lib/crt1.o" "$sysroot/usr/lib/crti.o" \
+      "$reboot_src" -L"$sysroot/usr/lib" -lc "$builtins" "$sysroot/usr/lib/crtn.o"
+    # A/B slot metadata in devinfo (Apache-2.0 port of Google's boot HAL). Not called by init yet.
+    "$CLANG_DIR/bin/clang" --target=aarch64-linux-musl --sysroot="$sysroot" -fuse-ld=lld -static -nostdlib -O2 \
+      -o "$stage/usr/local/bin/omamobile-bootctl" "$sysroot/usr/lib/crt1.o" "$sysroot/usr/lib/crti.o" \
+      "$ROOT/packages/$DEV_PACKAGE/src/omamobile-bootctl.c" -L"$sysroot/usr/lib" -lc "$builtins" "$sysroot/usr/lib/crtn.o"
+  else
+    # No Android clang. Freestanding devmem avoids a libc; a host clang that
+    # enables the stack protector by default will not link it otherwise.
+    # reboot-to links against musl with no Android builtins.
+    command -v clang >/dev/null || die "no clang on PATH; needed to build devmem and reboot-to"
+    command -v ld.lld >/dev/null || die "no ld.lld on PATH; needed to build devmem and reboot-to"
+    clang --target=aarch64-linux-gnu -nostdlib -static -ffreestanding -fno-builtin \
+      -fno-stack-protector -fno-pie -fuse-ld=lld -O2 \
+      -o "$stage/usr/local/bin/devmem" "$ROOT/tools/devmem-freestanding.c" \
+      || die "freestanding devmem failed to link"
+    sysroot=$(alpine_sysroot)
+    clang --target=aarch64-linux-musl --sysroot="$sysroot" -nostdinc -isystem "$sysroot/usr/include" \
+      -static -nostdlib -O2 -fno-stack-protector -fno-pie -fuse-ld=lld \
+      -o "$stage/usr/local/bin/reboot-to" \
+      "$sysroot/usr/lib/crt1.o" "$sysroot/usr/lib/crti.o" \
+      "$reboot_src" "$sysroot/usr/lib/libc.a" "$sysroot/usr/lib/crtn.o" \
+      || die "reboot-to failed to link"
+    say "No $DEV_PACKAGE bootctl; built freestanding devmem and musl reboot-to"
   fi
-  builtins=$(find "$CLANG_DIR/lib/clang" -name 'libclang_rt.builtins-aarch64-android.a' | head -1)
-  "$CLANG_DIR/bin/clang" --target=aarch64-linux-musl --sysroot="$sysroot" -fuse-ld=lld -static -nostdlib -O2 \
-    -o "$stage/usr/local/bin/devmem" "$sysroot/usr/lib/crt1.o" "$sysroot/usr/lib/crti.o" \
-    "$ROOT/tools/devmem.c" -L"$sysroot/usr/lib" -lc "$builtins" "$sysroot/usr/lib/crtn.o"
-  "$CLANG_DIR/bin/clang" --target=aarch64-linux-musl --sysroot="$sysroot" -fuse-ld=lld -static -nostdlib -O2 \
-    -o "$stage/usr/local/bin/reboot-to" "$sysroot/usr/lib/crt1.o" "$sysroot/usr/lib/crti.o" \
-    "$ROOT/packages/$DEV_PACKAGE/src/reboot-to.c" -L"$sysroot/usr/lib" -lc "$builtins" "$sysroot/usr/lib/crtn.o"
-  # A/B slot metadata in devinfo (Apache-2.0 port of Google's boot HAL). Not called by init yet.
-  "$CLANG_DIR/bin/clang" --target=aarch64-linux-musl --sysroot="$sysroot" -fuse-ld=lld -static -nostdlib -O2 \
-    -o "$stage/usr/local/bin/omamobile-bootctl" "$sysroot/usr/lib/crt1.o" "$sysroot/usr/lib/crti.o" \
-    "$ROOT/packages/$DEV_PACKAGE/src/omamobile-bootctl.c" -L"$sysroot/usr/lib" -lc "$builtins" "$sysroot/usr/lib/crtn.o"
   mkdir -p "$stage/root/.ssh"
   cat "$HOME"/.ssh/*.pub > "$stage/root/.ssh/authorized_keys"
   chmod 700 "$stage/root/.ssh" && chmod 600 "$stage/root/.ssh/authorized_keys"
@@ -404,7 +467,8 @@ cmd_fastboot() {
       adb reboot bootloader
     elif "$ssh" true 2>/dev/null; then
       say "Our Linux: reboot-to bootloader"
-      "$ssh" '(sleep 1; reboot-to bootloader) >/dev/null 2>&1 &' || true
+      # dropbear's login PATH omits /usr/local/bin, where the initramfs installs reboot-to
+      "$ssh" '(sleep 1; PATH=/usr/local/bin:$PATH reboot-to bootloader) >/dev/null 2>&1 &' || true
       sleep 25
       if ! in_fastboot && "$ssh" true 2>/dev/null; then
         say "Bootloader ignored the reason; crashing so it falls back to slot A"
@@ -448,6 +512,13 @@ cmd_push() {
   load_device
   images_for_device "$img"
   "$ssh" true || die "phone not reachable at 172.16.42.1"
+  # Refuse before any write. A phone whose initramfs has no reboot-to would
+  # otherwise take the images, swallow the reboot, and report success while
+  # the old kernel is still running.
+  local booted id
+  booted=$("$ssh" 'cat /proc/sys/kernel/random/boot_id') || die "cannot read the phone's boot id"
+  # dropbear's login PATH omits /usr/local/bin, where the initramfs installs reboot-to
+  "$ssh" 'PATH=/usr/local/bin:$PATH command -v reboot-to >/dev/null' || die "phone has no reboot-to; refusing to write"
   # A kernel whose modules aren't installed boots without its drivers (the GPU
   # among them): install them first. A config change can keep the release
   # name, so compare the tarball's checksum, not just the directory.
@@ -468,13 +539,21 @@ cmd_push() {
     say "${p}_b ($dev) written and verified"
   done
   say "Rebooting into the new images"
-  "$ssh" 'sync; (sleep 1; reboot-to omamobile) >/dev/null 2>&1 &' || true
+  "$ssh" 'sync; (sleep 1; PATH=/usr/local/bin:$PATH reboot-to omamobile) >/dev/null 2>&1 &' || true
   sleep 15
-  local i
+  local i saw_same=0
   for i in $(seq 1 45); do
-    "$ssh" 'uname -v; cut -d" " -f1 /proc/uptime' 2>/dev/null && return 0
+    if id=$("$ssh" 'cat /proc/sys/kernel/random/boot_id' 2>/dev/null); then
+      if [[ $id != "$booted" ]]; then
+        "$ssh" 'uname -v; cut -d" " -f1 /proc/uptime' && return 0
+      fi
+      saw_same=1
+    fi
     sleep 2
   done
+  if [[ $saw_same == 1 ]]; then
+    die "same boot id: the reboot did not happen"
+  fi
   die "no SSH after reboot (the safety net crashes back to slot A within about a minute)"
 }
 

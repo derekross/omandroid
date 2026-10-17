@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
-# Tests for omamobile-device-cheetah, from a copy of this directory alone.
+# Tests for omamobile-device-cheetah. reboot-to is compiled from
+# src/reboot-to.c in this directory, so a copied package still builds.
 set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
@@ -9,6 +10,9 @@ tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 
 for script in bin/*; do bash -n "$script" || fail "$script parses"; done
 pass "scripts parse"
+
+grep -q '\.\./\.\.' build && fail "build reaches outside the package directory"
+pass "build stays inside the package directory"
 
 ./build "$tmp/build" || fail "C tools compile"
 pass "C tools compile"

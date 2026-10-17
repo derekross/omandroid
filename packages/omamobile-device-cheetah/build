@@ -5,6 +5,5 @@ set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 out=${1:-build}
 mkdir -p "$out"
-for tool in omamobile-bootctl reboot-to; do
-  ${CC:-cc} ${CFLAGS:--O2} -Wall -Wextra -o "$out/$tool" "src/$tool.c" ${LDFLAGS:-}
-done
+${CC:-cc} ${CFLAGS:--O2} -Wall -Wextra -o "$out/omamobile-bootctl" src/omamobile-bootctl.c ${LDFLAGS:-}
+${CC:-cc} ${CFLAGS:--O2} -Wall -Wextra -o "$out/reboot-to" src/reboot-to.c ${LDFLAGS:-}

@@ -3,9 +3,9 @@
 # The installer's tests (no phone, nothing flashed): tools/install-phone
 # against a fake fastboot, tools/phone-provision against a synthetic backup
 # (and a container standing in for the phone, with Docker), the initramfs's
-# first-boot growth, bin/omamobile's boot-image layouts and flash against a
-# fake fastboot, omamobile-firstboot's own tests, and the smoke test of
-# the newest root image in out/ if there is one.
+# first-boot growth, the simplefb trigger, bin/omamobile's boot-image layouts
+# and flash against a fake fastboot, omamobile-firstboot's own tests, and the
+# smoke test of the newest root image in out/ if there is one.
 set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 for f in tools/install-phone tools/phone-provision tools/build-rootfs tools/build-packages tools/make-bundle \
@@ -13,9 +13,9 @@ for f in tools/install-phone tools/phone-provision tools/build-rootfs tools/buil
   [[ -f $f ]] || continue   # tests/owl is the OWL conformance suite's folder
   bash -n "$f" || { echo "not ok - $f parses" >&2; exit 1; }
 done
-sh -n device/*/initramfs/init
+sh -n initramfs/init
 echo "ok - scripts parse"
-for t in tests/install-phone tests/phone-provision tests/initramfs-grow tests/images-layout packages/omamobile-firstboot/test/all; do
+for t in tests/install-phone tests/phone-provision tests/initramfs-grow tests/images-layout tests/simplefb-trigger packages/omamobile-firstboot/test/all; do
   echo "# $t"
   "$t"
 done

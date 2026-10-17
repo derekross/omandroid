@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Empty board overlay for the Pixel Fold bootloader (ABL).
+ *
+ * ABL picks a dtbo entry by board_id/board_rev and applies it on top of
+ * the base DTB. The stock overlay references Google labels that do not
+ * exist in the mainline DTB, so this one changes nothing.
+ *
+ * board_id 0x30606 and board_rev 0x10000 match ro.boot.cdt_hwid
+ * 0x00030606 00010000 and ro.boot.dtbo_idx 10.
+ */
+/dts-v1/;
+/plugin/;
+
+/ {
+	board_id = <0x30606>;
+	board_rev = <0x10000>;
+
+	fragment@0 {
+		target-path = "/";
+		__overlay__ {
+		};
+	};
+};
