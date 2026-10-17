@@ -151,12 +151,19 @@ cmd_capture() {
 cmd_kernel() {
   [[ -d "$KERNEL_DIR" ]] || die "no kernel tree at $KERNEL_DIR"
   [[ -n "$CLANG_DIR" ]] || die "no clang found; run 'lineage-ref sync' first or set CLANG_DIR"
+  # The codename goes into a path below, as in load_device
+  [[ $DEVICE =~ ^[a-z0-9]+$ ]] || die "DEVICE must be a codename, not '$DEVICE'"
+  local fragment="$ROOT/device/$DEVICE/kernel.config"
   say "Building $KERNEL_DIR into $KERNEL_OUT"
   mkdir -p "$KERNEL_OUT"
   in_container "
     set -e
     make ARCH=arm64 LLVM=1 O=$KERNEL_OUT defconfig
     scripts/kconfig/merge_config.sh -m -O $KERNEL_OUT $KERNEL_OUT/.config $ROOT/kernel/configs/omamobile.config
+    # The device's own options on top, where they would break another device
+    if [ -f $fragment ]; then
+      scripts/kconfig/merge_config.sh -m -O $KERNEL_OUT $KERNEL_OUT/.config $fragment
+    fi
     make ARCH=arm64 LLVM=1 O=$KERNEL_OUT olddefconfig
     make ARCH=arm64 LLVM=1 O=$KERNEL_OUT -j$JOBS Image.gz dtbs modules
     ls -lh $KERNEL_OUT/arch/arm64/boot/Image.gz
@@ -427,10 +434,19 @@ cmd_flash() {
   load_device
   images_for_device "$img"
   in_fastboot || die "phone not in fastboot (try: omamobile fastboot)"
+  # Every image and allowlist entry first: never start writing slot B and
+  # find out halfway that a later image is missing.
   for p in $DEV_BOOT_IMAGES; do
     slot_b_allowed "$p" || die "${p}_b is not on device/$DEVICE's storage-guard allowlist; refusing"
     [[ -f "$img/$p.img" ]] || die "missing $img/$p.img (run: omamobile images)"
-    timeout 60 fastboot flash "${p}_b" "$img/$p.img" 2>&1 | grep -E 'OKAY|FAIL' | tail -1 | sed "s/^/$p: /"
+  done
+  local out rc
+  for p in $DEV_BOOT_IMAGES; do
+    rc=0
+    out=$(timeout 60 fastboot flash "${p}_b" "$img/$p.img" 2>&1) || rc=$?
+    echo "$out" | grep -E 'OKAY|FAIL' | tail -1 | sed "s/^/$p: /" || true
+    # Stop before activating or rebooting into a half-written slot B
+    ((rc == 0)) || die "flashing ${p}_b failed (exit $rc): slot B is incomplete, flash again before rebooting"
   done
   timeout 20 fastboot --set-active=b >/dev/null 2>&1
   timeout 20 fastboot reboot >/dev/null 2>&1
