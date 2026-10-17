@@ -118,7 +118,7 @@ Bring-up steps hang phones. Plan for it before you start:
 ## 4. The development loop
 
 ```sh
-# Kernel: defconfig + kernel/configs/omamobile.config, built in the container
+# Kernel: defconfig + kernel/configs/omamobile.config (+ device/<codename>/kernel.config), built in the container
 bin/omamobile kernel           # Image, DTBs, modules into $KERNEL_OUT
 bin/omamobile modules          # stripped modules tarball for the Arch root
 bin/omamobile initramfs        # Alpine + dropbear + device/<codename>/initramfs/init
