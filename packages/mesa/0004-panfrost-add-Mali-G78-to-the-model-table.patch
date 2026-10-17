@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: saiththerobo <the.tom.sharp@gmail.com>
+Date: Sat, 17 Oct 2026 06:04:30 +0100
+Subject: [PATCH] panfrost: add Mali-G78 to the model table
+
+Mali-G78 (Arm's tBEx, GPU_ID 0x9202xxxx: arch 9.2, product major 2) is a
+Valhall v9 job-manager GPU like the G68 (9.2.4). The Pixel 6 and 6 Pro
+(Google gs101) carry a G78 MP20; without an entry the Gallium driver
+refuses the device and the session renders on llvmpipe.
+
+The entry uses the G68's tile-buffer sizes and rates, and the "G78"
+performance counter layout that the G68 entry already names.
+---
+ src/panfrost/model/pan_model.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/panfrost/model/pan_model.c b/src/panfrost/model/pan_model.c
+index f046f1d..4c525bf 100644
+--- a/src/panfrost/model/pan_model.c
++++ b/src/panfrost/model/pan_model.c
+@@ -85,6 +85,8 @@ const struct pan_model pan_model_list[] = {
+                                               MODEL_RATES_X(2, 4, 8,  32,  32, 8)),
+    VALHALL_MODEL(PAN_PROD_ID(9, 0, 3), 0, "G57",    "G77", MODEL_ANISO(ALL),  MODEL_TB_SIZES(16384,  8192),
+                                               MODEL_RATES_X(2, 4, 8,  32,  32, 8)),
++   VALHALL_MODEL(PAN_PROD_ID(9, 2, 2), 0, "G78",    "G78", MODEL_ANISO(ALL),  MODEL_TB_SIZES(16384,  8192),
++                                              MODEL_RATES_X(2, 4, 8,  32,  32, 8)),
+    VALHALL_MODEL(PAN_PROD_ID(9, 2, 4), 0, "G68",    "G78", MODEL_ANISO(ALL),  MODEL_TB_SIZES(16384,  8192),
+                                               MODEL_RATES_X(2, 4, 8,  32,  32, 8)),
+    VALHALL_MODEL(PAN_PROD_ID(10, 8, 2), 0, "G710",   "G710", MODEL_ANISO(ALL),  MODEL_TB_SIZES(32768, 16384),
+-- 
+2.47.3
+

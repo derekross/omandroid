@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: 0BSD
 #
-# Omarchy Mobile build of Mesa for the Pixel 7 Pro (Mali-G710 on Panthor).
+# Omarchy Mobile build of Mesa for the Pixel 7 Pro (Mali-G710 on Panthor)
+# and the Pixel 6 and 6 Pro (Mali-G78 on Panfrost).
 #
 # Derived from Arch Linux's mesa PKGBUILD, tag 1-26.2.4-1
 # (https://gitlab.archlinux.org/archlinux/packaging/packages/mesa, 0BSD),
@@ -11,13 +12,17 @@
 #  - 0002-panfrost-don-t-make-image-BOs-private-on-panthor.patch: panthor
 #    can't export a BO private to one GPU VM, and GTK 4 exports GL textures
 #    created without PIPE_BIND_SHARED (GNOME Snapshot crashed after photos).
+#  - 0003-panfrost-Advertise-Mali-G68-support.patch: upstream's 93d2c51f,
+#    backported (drop it once Mesa ships it in a release).
+#  - 0004-panfrost-add-Mali-G78-to-the-model-table.patch: the Pixel 6's
+#    Mali-G78, next to the G68 (drop it once Mesa ships the G78 entry).
 #  - aarch64 only, and only the drivers this phone can use: Gallium
 #    panfrost (with kmsro), llvmpipe, softpipe and zink; Vulkan panfrost
 #    (PanVK). Splits: mesa, vulkan-panfrost, vulkan-mesa-implicit-layers
 #    (vulkan-panfrost depends on it). No rusticl, NVK, docs or valgrind,
 #    so no Rust crates and a much shorter native build.
-#  - pkgrel 1.2: makepkg only allows integer[.integer], so the Omarchy Mobile
-#    marker lives in the VERSION string (".omamobile2"), which shows up in
+#  - pkgrel 1.3: makepkg only allows integer[.integer], so the Omarchy Mobile
+#    marker lives in the VERSION string (".omamobile3"), which shows up in
 #    GL_VERSION and the libgallium file name.
 #
 # Maintainers of the original: Laurent Carlier, Felix Yan, Jan Alexander
@@ -31,10 +36,10 @@ pkgname=(
 )
 pkgver=26.2.4
 _pkgver=${pkgver/[a-z]/-&}
-pkgrel=1.2
-_omamobile=omamobile2
+pkgrel=1.3
+_omamobile=omamobile3
 epoch=1
-pkgdesc="Open-source OpenGL drivers (Omarchy Mobile: Mali-G710)"
+pkgdesc="Open-source OpenGL drivers (Omarchy Mobile: Mali-G710, Mali-G78)"
 url="https://www.mesa3d.org/"
 arch=(aarch64)
 license=("MIT AND BSD-3-Clause AND SGI-B-2.0")
@@ -90,6 +95,8 @@ source=(
   "https://archive.mesa3d.org/mesa-$_pkgver.tar.xz"{,.sig}
   0001-panfrost-add-Mali-G710-to-the-model-table.patch
   0002-panfrost-don-t-make-image-BOs-private-on-panthor.patch
+  0003-panfrost-Advertise-Mali-G68-support.patch
+  0004-panfrost-add-Mali-G78-to-the-model-table.patch
 )
 validpgpkeys=(
   946D09B5E4C9845E63075FF1D961C596A7203456 # Andres Gomez <tanty@igalia.com>
@@ -102,11 +109,15 @@ validpgpkeys=(
 b2sums=('28506a9366e3c031acbb52924e43b0ec098f44a3ac3bb839ec2a86fa0faf83652347704b0e58bdc447aaebae5a2a254e5456e0b893755fd7721e57d6b614ecc4'
         'SKIP'
         '13c27e8a37c0e838c56b660a798d74565181dab88cb3402a19e2ad026a012f0594d6bc70ad26fe247b324e2aa5429edeb8681e234124a0a978084b549b2641ae'
-        '38fbdbe0742564a4e7e040a828a564c2eb96fce5616c24bb42ab1da9241455e5e85d1275b5d94c53c3f560c0226ce65db9917c0cc04be636b38a6d2f24f40804')
+        '38fbdbe0742564a4e7e040a828a564c2eb96fce5616c24bb42ab1da9241455e5e85d1275b5d94c53c3f560c0226ce65db9917c0cc04be636b38a6d2f24f40804'
+        '44d9787b8544af6babe9296aac9600ec8eaf324bdaf702f62a953104884957db19c019717a442c13e682fec9d13c666cc946c30cdf6c437de0f11cf61e9a2739'
+        'ed9461d4ed0a9e9502bccff3422d0be0b82f7a5e8ebff05e9116c0d4f9d26ab659dc48fbc54580c186a8fd26f0d360122fdec114ca7219d4ab49123a932358fc')
 sha256sums=('bce5f7fbebb934373b86c999a064d52fb5065878dc57f287f95346648ec832e9'
             'SKIP'
             '1a6ac513fb44579f6ca72a2c92bb7fd86743a4a9dc01f452ac1ab93073100ce1'
-            'f064ce851d4898b87c95ea55c3367de9cdddb4e6a99e6ba89033e76dc9adecb8')
+            'f064ce851d4898b87c95ea55c3367de9cdddb4e6a99e6ba89033e76dc9adecb8'
+            'edec51dfb5147de62aca0093bf2915d0cccf27e216f63ec8588064f18990ab3d'
+            'b4e6d7d29277cf4f11317968c26eb5c9f3fb89cd18f36615d45aa5d40134817a')
 
 prepare() {
   cd mesa-$_pkgver
